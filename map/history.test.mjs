@@ -1,4 +1,4 @@
-// Run: node --test map/
+// Run: node --test map/history.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -136,4 +136,23 @@ test('describe helpers', () => {
   assert.equal(describeDuration(0), 'under 1m');
   assert.equal(describeDistance(150), '150 m');
   assert.equal(describeDistance(1609.344 * 2.25), '2.3 mi');
+});
+
+test('parsed points carry their Mountain day so day lookups stay fast on 20,000 rows', () => {
+  const rows = [HEADER];
+  const start = Date.UTC(2026, 10, 1, 7);
+  for (let i = 0; i < 20000; i++) {
+    const d = new Date(start + i * 5 * 60000);
+    const date = dayKey(d);
+    const time = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Denver', hour: 'numeric', minute: '2-digit', second: '2-digit', timeZoneName: 'short' }).format(d);
+    rows.push([date, time, 40.76, -111.89, 10, 0.4, '', '', '', '', '', '', '']);
+  }
+  const pts = parseItemRows(rows);
+  assert.equal(pts[0].day, dayKey(pts[0].time));
+  const t0 = performance.now();
+  const days = daysWithData(pts);
+  for (const d of days.slice(0, 5)) pointsForDay(pts, d);
+  const ms = performance.now() - t0;
+  assert.ok(days.length >= 69, `days=${days.length}`);
+  assert.ok(ms < 100, `day lookups took ${ms.toFixed(0)} ms`);
 });

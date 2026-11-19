@@ -7,11 +7,12 @@ const ABBR_OFFSET = { MST: -7, MDT: -6 };
 const SHEETS_EPOCH_MS = Date.UTC(1899, 11, 30);
 
 /** Offset of America/Denver from UTC, in hours, at an instant. */
+const PARTS_FORMAT = new Intl.DateTimeFormat('en-US', {
+  timeZone: ZONE, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit',
+  hour: '2-digit', minute: '2-digit', second: '2-digit',
+});
 function zoneOffsetHours(instantMs) {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: ZONE, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
-  }).formatToParts(new Date(instantMs));
+  const parts = PARTS_FORMAT.formatToParts(new Date(instantMs));
   const v = Object.fromEntries(parts.map((p) => [p.type, Number(p.value)]));
   const asUTC = Date.UTC(v.year, v.month - 1, v.day, v.hour, v.minute, v.second);
   return Math.round((asUTC - instantMs) / 3600000);
@@ -65,7 +66,7 @@ function toPoint(r, offset = 0) {
   const lon = num(r[offset + COL.lon]);
   if (!time || lat == null || lon == null || Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
   return {
-    time, lat, lon,
+    time, day: dayKey(time), lat, lon,
     accuracy: num(r[offset + COL.acc]),
     pinMatch: num(r[offset + COL.match]),
     address: text(r[offset + COL.address]),
@@ -90,14 +91,14 @@ export function parseLatestRows(rows) {
 }
 
 /** "2026-11-19" for the Mountain calendar day an instant falls on. */
-export function dayKey(date) {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: ZONE, year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
-}
+const DAY_FORMAT = new Intl.DateTimeFormat('en-CA', { timeZone: ZONE, year: 'numeric', month: '2-digit', day: '2-digit' });
+export const dayKey = (date) => DAY_FORMAT.format(date);
 
-export const pointsForDay = (points, key) => points.filter((p) => dayKey(p.time) === key);
+const dayOf = (p) => p.day ?? dayKey(p.time);
+export const pointsForDay = (points, key) => points.filter((p) => dayOf(p) === key);
 
 /** Days that have readings, newest first. */
-export const daysWithData = (points) => [...new Set(points.map((p) => dayKey(p.time)))].sort().reverse();
+export const daysWithData = (points) => [...new Set(points.map(dayOf))].sort().reverse();
 
 export function meters(a, b) {
   const r = 6371008.8, rad = Math.PI / 180;
@@ -171,6 +172,5 @@ export function describeDistance(m) {
   return miles >= 0.2 ? `${miles.toFixed(1)} mi` : `${Math.round(m)} m`;
 }
 
-export function clockTime(ms) {
-  return new Intl.DateTimeFormat('en-US', { timeZone: ZONE, hour: 'numeric', minute: '2-digit' }).format(new Date(ms));
-}
+const CLOCK_FORMAT = new Intl.DateTimeFormat('en-US', { timeZone: ZONE, hour: 'numeric', minute: '2-digit' });
+export const clockTime = (ms) => CLOCK_FORMAT.format(new Date(ms));

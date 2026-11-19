@@ -1,6 +1,7 @@
 // Item Trails: reads the private "Find My Tracker" sheet in the browser with the signed-in
 // user's own Google token (drive.file scope) and draws each item's day on a map.
-// Nothing is stored or sent anywhere else; the token lives only in this tab's memory.
+// Nothing is sent anywhere else. The token and the chosen item live only in this tab; the
+// browser keeps one flag ("signed in here before") so the next visit can skip the consent screen.
 import { CLIENT_ID, SHEET_NAME, LATEST_TAB, REFRESH_MS } from './config.js';
 import {
   parseItemRows, parseLatestRows, dayKey, pointsForDay, daysWithData, buildTimeline,
@@ -10,15 +11,18 @@ import { demoSource } from './demo.js';
 
 const $ = (sel) => document.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const store = {
-  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
-  set(k, v) { try { localStorage.setItem(k, v); } catch { /* private mode */ } },
-};
+const storage = (area) => ({
+  get(k) { try { return area().getItem(k); } catch { return null; } },
+  set(k, v) { try { area().setItem(k, v); } catch { /* private mode */ } },
+});
+const store = storage(() => localStorage);   // only the sign-in hint
+const tabStore = storage(() => sessionStorage); // the selected item, gone when the tab closes
 
 const state = {
-  source: null, items: [], latest: [], selected: store.get('trails.item') || '__all',
-  day: null, points: [], loadedAt: null, busy: false,
+  source: null, items: [], latest: [], selected: tabStore.get('trails.item') || '__all',
+  day: null, points: [], loadedAt: null, busy: false, seq: 0,
 };
+try { localStorage.removeItem('trails.item'); } catch { /* older builds kept it there */ }
 
 /* ---------- map ---------- */
 const dark = matchMedia('(prefers-color-scheme: dark)');
@@ -46,11 +50,12 @@ function mix(a, b, t) {
 const icon = (cls, html = '') => L.divIcon({ className: '', html: `<div class="${cls}">${html}</div>`, iconSize: null });
 const labelIcon = (text) => L.divIcon({ className: '', html: `<div class="pin-label">${esc(text)}</div>`, iconSize: null, iconAnchor: [-10, 10] });
 
-function fit(latlngs) {
+function fit(latlngs, { labels = false } = {}) {
   if (!latlngs.length) return;
   const wide = innerWidth >= 900;
-  const pad = wide ? { paddingTopLeft: [420, 40], paddingBottomRight: [40, 40] }
-    : { paddingTopLeft: [30, 40], paddingBottomRight: [30, Math.min(innerHeight * 0.62, 420)] };
+  const right = labels ? 140 : 30; // item labels sit to the right of their pins
+  const pad = wide ? { paddingTopLeft: [420, 40], paddingBottomRight: [right + 10, 40] }
+    : { paddingTopLeft: [30, 40], paddingBottomRight: [right, Math.ceil($('#panel').getBoundingClientRect().height) + 24] };
   if (latlngs.length === 1) map.setView(latlngs[0], 16);
   else map.fitBounds(L.latLngBounds(latlngs), { ...pad, maxZoom: 17 });
 }
@@ -60,6 +65,7 @@ function googleSource() {
   let token = null;
   let sheetId = null;
   let tokenClient = null;
+  let pending = null; // { resolve, reject } for the sign-in in flight
 
   async function api(url) {
     const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
@@ -76,13 +82,20 @@ function googleSource() {
       return new Promise((resolve, reject) => {
         if (!window.google?.accounts?.oauth2) { reject(new Error('Google sign-in is still loading. Try again in a moment.')); return; }
         tokenClient ??= google.accounts.oauth2.initTokenClient({
-          client_id: CLIENT_ID, scope: 'https://www.googleapis.com/auth/drive.file', callback: () => {},
+          client_id: CLIENT_ID,
+          scope: 'https://www.googleapis.com/auth/drive.file',
+          callback: (r) => {
+            const p = pending; pending = null;
+            if (r.error) { p?.reject(new Error(r.error === 'access_denied' ? 'Sign-in was cancelled.' : r.error)); return; }
+            token = r.access_token; store.set('trails.hint', '1'); p?.resolve();
+          },
+          error_callback: (e) => {
+            const p = pending; pending = null;
+            p?.reject(new Error(e.type === 'popup_closed' ? 'Sign-in window was closed.' : (e.message || 'Sign-in failed.')));
+          },
         });
-        tokenClient.callback = (r) => {
-          if (r.error) { reject(new Error(r.error === 'access_denied' ? 'Sign-in was cancelled.' : r.error)); return; }
-          token = r.access_token; store.set('trails.hint', '1'); resolve();
-        };
-        tokenClient.error_callback = (e) => reject(new Error(e.type === 'popup_closed' ? 'Sign-in window was closed.' : (e.message || 'Sign-in failed.')));
+        pending?.reject(new Error('Sign-in restarted.'));
+        pending = { resolve, reject };
         tokenClient.requestAccessToken({ prompt: store.get('trails.hint') ? '' : 'consent' });
       });
     },
@@ -110,27 +123,36 @@ function setStatus(text) { $('#status').textContent = text; }
 async function load({ quiet = false } = {}) {
   if (state.busy || !state.source?.signedIn) return;
   state.busy = true;
+  const seq = ++state.seq;
   if (!quiet) setStatus('Loading…');
+  let failed = null;
   try {
-    state.items = await state.source.items();
-    state.latest = parseLatestRows(await state.source.rows(LATEST_TAB));
-    if (state.selected !== '__all' && !state.items.includes(state.selected)) state.selected = '__all';
-    state.points = state.selected === '__all' ? [] : parseItemRows(await state.source.rows(state.selected));
-    state.loadedAt = Date.now();
+    const items = await state.source.items();
+    const latest = parseLatestRows(await state.source.rows(LATEST_TAB));
+    let selected = state.selected;
+    if (selected !== '__all' && !items.includes(selected)) selected = '__all';
+    const points = selected === '__all' ? [] : parseItemRows(await state.source.rows(selected));
+    if (seq !== state.seq) return; // the user picked another item meanwhile; its own load wins
+    Object.assign(state, { items, latest, selected, points, loadedAt: Date.now() });
     render({ refit: !quiet });
   } catch (e) {
+    if (seq !== state.seq) return;
     if (e.signedOut) renderSignIn('Your Google sign-in expired. Sign in again to keep the map live.');
+    else if (quiet && state.loadedAt) failed = e.message;
     else renderError(e.message);
   } finally {
     state.busy = false;
+    if (!state.source.signedIn) return;
     updateStatus();
+    if (failed) setStatus(`refresh failed · showing ${$('#status').textContent}`);
   }
 }
 
 function updateStatus() {
   if (!state.loadedAt) return;
   const newest = state.latest.reduce((m, p) => Math.max(m, p.time.getTime()), 0);
-  setStatus(newest ? `last check ${clockTime(newest)}` : `updated ${clockTime(state.loadedAt)}`);
+  const when = (ms) => (dayKey(new Date(ms)) === dayKey(new Date()) ? '' : `${new Date(ms).toLocaleDateString('en-US', { timeZone: 'America/Denver', month: 'short', day: 'numeric' })} `) + clockTime(ms);
+  setStatus(newest ? `last check ${when(newest)}` : `updated ${when(state.loadedAt)}`);
 }
 
 /* ---------- rendering ---------- */
@@ -142,14 +164,18 @@ function renderChips() {
 }
 
 async function selectItem(item) {
-  state.selected = item; state.day = null; store.set('trails.item', item);
+  const seq = ++state.seq;
+  state.selected = item; state.day = null; tabStore.set('trails.item', item);
   renderChips();
   if (item === '__all') { state.points = []; render({ refit: true }); return; }
   $('#body').innerHTML = '<p class="note">Loading trail…</p>';
   try {
-    state.points = parseItemRows(await state.source.rows(item));
+    const points = parseItemRows(await state.source.rows(item));
+    if (seq !== state.seq) return;
+    state.points = points;
     render({ refit: true });
   } catch (e) {
+    if (seq !== state.seq) return;
     if (e.signedOut) renderSignIn('Your Google sign-in expired. Sign in again to keep the map live.');
     else renderError(e.message);
   }
@@ -164,7 +190,10 @@ function render({ refit }) {
 function renderAll(refit) {
   const latest = [...state.latest].sort((a, b) => b.time - a.time);
   if (!latest.length) {
-    $('#body').innerHTML = '<div class="note"><strong>No locations yet</strong>The tracker on your Mac hasn\'t logged an exact location yet. It checks every 5 minutes.</div>';
+    $('#body').innerHTML = state.items.length
+      ? `<div class="note"><strong>No current exact pins</strong>None of your items shows an exact location right now. Pick one above to see the trail it has already logged.</div>${actions()}`
+      : `<div class="note"><strong>No locations yet</strong>The tracker on your Mac hasn't logged an exact location yet. It checks every 5 minutes.</div>${actions()}`;
+    wireActions();
     return;
   }
   const pts = [];
@@ -174,13 +203,13 @@ function renderAll(refit) {
     L.marker(ll, { icon: labelIcon(p.item), interactive: true, keyboard: false })
       .on('click', () => selectItem(p.item)).addTo(layer);
   }
-  if (refit) fit(pts);
   $('#body').innerHTML = `<ol class="timeline">${latest.map((p, i) => `
-    <li class="seg" tabindex="0" style="animation-delay:${i * 30}ms" data-item="${esc(p.item)}">
+    <li class="seg" role="button" tabindex="0" style="animation-delay:${i * 30}ms" data-item="${esc(p.item)}">
       <div class="when">${esc(p.time.toLocaleDateString('en-US', { timeZone: 'America/Denver', month: 'short', day: 'numeric' }))} · ${clockTime(p.time)}</div>
       <div class="what">${esc(p.item)}</div>
       <div class="addr">${esc(p.place || p.address || p.shows)}</div>
     </li>`).join('')}</ol>${actions()}`;
+  if (refit) fit(pts, { labels: true });
   $('#body').querySelectorAll('.seg').forEach((li) => {
     const go = () => selectItem(li.dataset.item);
     li.addEventListener('click', go);
@@ -197,7 +226,7 @@ function renderItem(refit) {
     return;
   }
   const today = dayKey(new Date());
-  state.day ??= days.includes(today) ? today : days[0];
+  if (!days.includes(state.day)) state.day = days.includes(today) ? today : days[0];
   const pts = pointsForDay(state.points, state.day);
   const tl = buildTimeline(pts);
   const stops = tl.filter((s) => s.kind === 'stop');
@@ -219,7 +248,6 @@ function renderItem(refit) {
   if (last.accuracy) L.circle([last.lat, last.lon], { radius: last.accuracy, color: late, weight: 1, fillOpacity: .08 }).addTo(layer);
   L.marker([last.lat, last.lon], { icon: icon('pin-now'), keyboard: false, zIndexOffset: 1000 })
     .bindPopup(`<b>${esc(state.selected)}</b><br>${clockTime(last.time)} · ${esc(last.place || last.address)}`).addTo(layer);
-  if (refit) fit(lls);
 
   const first = pts[0].time.getTime(), lastMs = last.time.getTime();
   const dayLabel = new Date(`${state.day}T12:00:00Z`).toLocaleDateString('en-US', { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric' });
@@ -236,15 +264,16 @@ function renderItem(refit) {
     </div>
     ${pts.length > 1 ? `<div class="scrub">
       <div class="scrub-row"><span>${clockTime(first)}</span><b id="scrubTime">${clockTime(lastMs)}</b><span>${clockTime(lastMs)}</span></div>
-      <input id="scrub" type="range" min="${first}" max="${lastMs}" step="60000" value="${lastMs}" aria-label="Where was it at this time">
+      <input id="scrub" type="range" min="${first}" max="${lastMs}" step="any" value="${lastMs}" aria-label="Where was it at this time">
     </div>` : ''}
     <ol class="timeline">${[...tl].reverse().map((s, i) => `
-      <li class="seg ${s.kind}" tabindex="0" style="animation-delay:${i * 30}ms" data-lat="${s.lat}" data-lon="${s.lon}">
+      <li class="seg ${s.kind}" role="button" tabindex="0" style="animation-delay:${i * 30}ms" data-lat="${s.lat}" data-lon="${s.lon}">
         <div class="when">${clockTime(s.start)}${s.end > s.start ? ` – ${clockTime(s.end)} · ${describeDuration(s.end - s.start)}` : ''}</div>
         <div class="what">${s.kind === 'stop' ? esc(s.label) : `Moving · ${describeDistance(pathMeters(s.points))}`}</div>
         ${s.kind === 'stop' && s.address && s.address !== s.label ? `<div class="addr">${esc(s.address)}</div>` : ''}
       </li>`).join('')}</ol>
     ${actions()}`;
+  if (refit) fit(lls); // after the panel has its content, so the padding matches its height
 
   const goDay = (d) => { if (d) { state.day = d; render({ refit: true }); } };
   $('#older')?.addEventListener('click', () => goDay(days[idx + 1]));
@@ -276,7 +305,7 @@ function wireActions() { $('#refresh')?.addEventListener('click', () => load());
 function renderSignIn(message) {
   layer.clearLayers();
   $('#items').innerHTML = '';
-  $('#body').innerHTML = `<div class="note"><strong>Private map</strong>${esc(message || 'Sign in with the Google account that owns your Find My Tracker sheet. The page reads it straight from Google; nothing is stored here.')}
+  $('#body').innerHTML = `<div class="note"><strong>Private map</strong>${esc(message || 'Sign in with the Google account that owns your Find My Tracker sheet. The page reads it straight from Google; your locations are never stored on this site.')}
     <div><button class="btn" id="signin">Sign in with Google</button></div></div>`;
   $('#signin').addEventListener('click', async () => {
     try { await state.source.signIn(); await load(); } catch (e) { renderSignIn(e.message); }

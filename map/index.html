@@ -12,16 +12,16 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" integrity="sha512-h9FcoyWjHcOcmEVkxOfTLnmZFWIH0iZhZT1H2TbOq55xssQGEJHEaIm+PgoUaZbRvQTNTluNOEfb1ZRy6D3BOw==" crossorigin="anonymous">
 <style>
 :root {
   --paper: #f3eee3; --panel: #fbf8f1; --ink: #1d2327; --muted: #6b6f68; --rule: #d9d1c0;
-  --accent: #d2452c; --trail-early: #a9b7b0; --stop: #1f5f5b; --focus: #2d6cdf;
+  --accent: #bf3a22; --trail-early: #a9b7b0; --stop: #1f5f5b; --focus: #2d6cdf;
   --shadow: 0 18px 40px -18px rgba(40, 30, 10, .35);
   --serif: 'Fraunces', Georgia, serif; --mono: 'JetBrains Mono', ui-monospace, monospace;
 }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
+  :root {
     --paper: #0f1417; --panel: #161d21; --ink: #e8e2d4; --muted: #8b958f; --rule: #2a3439;
     --accent: #ff7a59; --trail-early: #3f5a57; --stop: #6fc3b8; --focus: #8ab4ff;
     --shadow: 0 18px 40px -18px rgba(0, 0, 0, .7);
@@ -69,6 +69,8 @@ h1 em { font-style: normal; color: var(--accent); }
 .day button:disabled { opacity: .35; cursor: default; }
 .day label { position: relative; text-align: center; font-family: var(--serif); font-size: 17px; font-weight: 500; }
 .day input { position: absolute; inset: 0; opacity: 0; width: 100%; cursor: pointer; }
+.day label { border-radius: 10px; }
+.day label:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
 
 .stats { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); margin-bottom: 12px; }
 .stats div { padding: 9px 0; }
@@ -107,7 +109,6 @@ ol.timeline::before { content: ''; position: absolute; left: 11px; top: 8px; bot
 .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--panel); color: var(--ink); }
 .leaflet-popup-content { font: 12px/1.45 var(--mono); }
 .leaflet-popup-content b { font: 600 14px var(--serif); }
-.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 </style>
 </head>
 <body>
@@ -118,7 +119,7 @@ ol.timeline::before { content: ''; position: absolute; left: 11px; top: 8px; bot
   <nav id="items" aria-label="Items"></nav>
   <div class="scroll" id="body"></div>
 </section>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" integrity="sha512-puJW3E/qXDqYp9IfhAI54BJEaWIfloJ7JWs7OeD5i6ruC9JZL1gERT1wjtwXFlh7CjE7ZJ+/vcRZRkIYIb6p4g==" crossorigin="anonymous"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script type="module" src="app.js"></script>
 </body>
