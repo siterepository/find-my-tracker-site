@@ -123,7 +123,7 @@ function setStatus(text) { $('#status').textContent = text; }
 async function load({ quiet = false } = {}) {
   if (state.busy || !state.source?.signedIn) return;
   state.busy = true;
-  const seq = ++state.seq;
+  const seq = state.seq; // only an item tap moves the counter, so a refresh never cancels a tap
   if (!quiet) setStatus('Loading…');
   let failed = null;
   try {
@@ -132,7 +132,7 @@ async function load({ quiet = false } = {}) {
     let selected = state.selected;
     if (selected !== '__all' && !items.includes(selected)) selected = '__all';
     const points = selected === '__all' ? [] : parseItemRows(await state.source.rows(selected));
-    if (seq !== state.seq) return; // the user picked another item meanwhile; its own load wins
+    if (seq !== state.seq) return; // the user tapped an item meanwhile; that tap's load wins
     Object.assign(state, { items, latest, selected, points, loadedAt: Date.now() });
     render({ refit: !quiet });
   } catch (e) {
@@ -204,17 +204,13 @@ function renderAll(refit) {
       .on('click', () => selectItem(p.item)).addTo(layer);
   }
   $('#body').innerHTML = `<ol class="timeline">${latest.map((p, i) => `
-    <li class="seg" role="button" tabindex="0" style="animation-delay:${i * 30}ms" data-item="${esc(p.item)}">
-      <div class="when">${esc(p.time.toLocaleDateString('en-US', { timeZone: 'America/Denver', month: 'short', day: 'numeric' }))} · ${clockTime(p.time)}</div>
-      <div class="what">${esc(p.item)}</div>
-      <div class="addr">${esc(p.place || p.address || p.shows)}</div>
-    </li>`).join('')}</ol>${actions()}`;
+    <li><button class="seg" style="animation-delay:${i * 30}ms" data-item="${esc(p.item)}">
+      <span class="when">${esc(p.time.toLocaleDateString('en-US', { timeZone: 'America/Denver', month: 'short', day: 'numeric' }))} · ${clockTime(p.time)}</span>
+      <span class="what">${esc(p.item)}</span>
+      <span class="addr">${esc(p.place || p.address || p.shows)}</span>
+    </button></li>`).join('')}</ol>${actions()}`;
   if (refit) fit(pts, { labels: true });
-  $('#body').querySelectorAll('.seg').forEach((li) => {
-    const go = () => selectItem(li.dataset.item);
-    li.addEventListener('click', go);
-    li.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
-  });
+  $('#body').querySelectorAll('.seg').forEach((b) => b.addEventListener('click', () => selectItem(b.dataset.item)));
   wireActions();
 }
 
@@ -267,11 +263,11 @@ function renderItem(refit) {
       <input id="scrub" type="range" min="${first}" max="${lastMs}" step="any" value="${lastMs}" aria-label="Where was it at this time">
     </div>` : ''}
     <ol class="timeline">${[...tl].reverse().map((s, i) => `
-      <li class="seg ${s.kind}" role="button" tabindex="0" style="animation-delay:${i * 30}ms" data-lat="${s.lat}" data-lon="${s.lon}">
-        <div class="when">${clockTime(s.start)}${s.end > s.start ? ` – ${clockTime(s.end)} · ${describeDuration(s.end - s.start)}` : ''}</div>
-        <div class="what">${s.kind === 'stop' ? esc(s.label) : `Moving · ${describeDistance(pathMeters(s.points))}`}</div>
-        ${s.kind === 'stop' && s.address && s.address !== s.label ? `<div class="addr">${esc(s.address)}</div>` : ''}
-      </li>`).join('')}</ol>
+      <li><button class="seg ${s.kind}" style="animation-delay:${i * 30}ms" data-lat="${s.lat}" data-lon="${s.lon}">
+        <span class="when">${clockTime(s.start)}${s.end > s.start ? ` – ${clockTime(s.end)} · ${describeDuration(s.end - s.start)}` : ''}</span>
+        <span class="what">${s.kind === 'stop' ? esc(s.label) : `Moving · ${describeDistance(pathMeters(s.points))}`}</span>
+        ${s.kind === 'stop' && s.address && s.address !== s.label ? `<span class="addr">${esc(s.address)}</span>` : ''}
+      </button></li>`).join('')}</ol>
     ${actions()}`;
   if (refit) fit(lls); // after the panel has its content, so the padding matches its height
 
@@ -291,11 +287,9 @@ function renderItem(refit) {
     scrubMarker.setLatLng([p.lat, p.lon]);
     if (!map.getBounds().contains(scrubMarker.getLatLng())) map.panTo([p.lat, p.lon]);
   });
-  $('#body').querySelectorAll('.seg').forEach((li) => {
-    const go = () => map.flyTo([Number(li.dataset.lat), Number(li.dataset.lon)], Math.max(map.getZoom(), 16), { duration: .6 });
-    li.addEventListener('click', go);
-    li.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
-  });
+  $('#body').querySelectorAll('.seg').forEach((b) => b.addEventListener('click', () => {
+    map.flyTo([Number(b.dataset.lat), Number(b.dataset.lon)], Math.max(map.getZoom(), 16), { duration: .6 });
+  }));
   wireActions();
 }
 
