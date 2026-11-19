@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Item Trails">
+<meta name="theme-color" content="#f3eee3" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f1417" media="(prefers-color-scheme: dark)">
+<title>Item Trails</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+:root {
+  --paper: #f3eee3; --panel: #fbf8f1; --ink: #1d2327; --muted: #6b6f68; --rule: #d9d1c0;
+  --accent: #d2452c; --trail-early: #a9b7b0; --stop: #1f5f5b; --focus: #2d6cdf;
+  --shadow: 0 18px 40px -18px rgba(40, 30, 10, .35);
+  --serif: 'Fraunces', Georgia, serif; --mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #0f1417; --panel: #161d21; --ink: #e8e2d4; --muted: #8b958f; --rule: #2a3439;
+    --accent: #ff7a59; --trail-early: #3f5a57; --stop: #6fc3b8; --focus: #8ab4ff;
+    --shadow: 0 18px 40px -18px rgba(0, 0, 0, .7);
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--paper); color: var(--ink); font-family: var(--mono); font-size: 14px; }
+button, input, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+#map { position: fixed; inset: 0; background: var(--paper); }
+.leaflet-container { font-family: var(--mono); background: var(--paper); }
+.dark-tiles { filter: invert(1) hue-rotate(180deg) brightness(.85) contrast(.9) saturate(.6); }
+.light-tiles { filter: sepia(.18) saturate(.85); }
+.leaflet-control-attribution { font-size: 10px; background: color-mix(in srgb, var(--panel) 85%, transparent) !important; color: var(--muted); }
+.leaflet-control-attribution a { color: var(--muted); }
+
+/* Ledger panel: bottom sheet on phones, left column on wide screens */
+#panel {
+  position: fixed; z-index: 500; left: 0; right: 0; bottom: 0; max-height: 62vh;
+  background: var(--panel); border-top: 1px solid var(--rule); border-radius: 18px 18px 0 0;
+  box-shadow: var(--shadow); display: flex; flex-direction: column;
+  padding-bottom: env(safe-area-inset-bottom); transition: max-height .35s cubic-bezier(.2,.8,.2,1);
+}
+#panel.collapsed { max-height: 132px; }
+@media (min-width: 900px) {
+  #panel, #panel.collapsed { top: 16px; left: 16px; bottom: 16px; right: auto; width: 380px; max-height: none; border-radius: 16px; border: 1px solid var(--rule); }
+  #grab { display: none; }
+}
+#grab { border: 0; background: none; padding: 8px 0 2px; cursor: pointer; width: 100%; }
+#grab span { display: block; margin: 0 auto; width: 40px; height: 4px; border-radius: 2px; background: var(--rule); }
+header { padding: 6px 16px 10px; display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+h1 { font-family: var(--serif); font-weight: 700; font-size: 22px; margin: 0; letter-spacing: -.01em; }
+h1 em { font-style: normal; color: var(--accent); }
+#status { color: var(--muted); font-size: 11px; text-align: right; }
+.scroll { overflow-y: auto; padding: 0 16px 16px; overscroll-behavior: contain; }
+
+#items { display: flex; gap: 6px; overflow-x: auto; padding: 0 16px 10px; scrollbar-width: none; }
+#items::-webkit-scrollbar { display: none; }
+.chip { flex: none; border: 1px solid var(--rule); background: transparent; border-radius: 999px; padding: 7px 12px; cursor: pointer; white-space: nowrap; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.chip[aria-pressed="true"] { background: var(--ink); color: var(--panel); border-color: var(--ink); }
+
+.day { display: grid; grid-template-columns: 40px 1fr 40px; align-items: center; gap: 6px; margin: 2px 0 12px; }
+.day button { height: 40px; border: 1px solid var(--rule); background: transparent; border-radius: 10px; cursor: pointer; font-size: 16px; }
+.day button:disabled { opacity: .35; cursor: default; }
+.day label { position: relative; text-align: center; font-family: var(--serif); font-size: 17px; font-weight: 500; }
+.day input { position: absolute; inset: 0; opacity: 0; width: 100%; cursor: pointer; }
+
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); margin-bottom: 12px; }
+.stats div { padding: 9px 0; }
+.stats div + div { border-left: 1px dashed var(--rule); padding-left: 10px; }
+.stats b { display: block; font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.stats small { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+
+.scrub { margin-bottom: 14px; }
+.scrub-row { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; }
+.scrub-row b { color: var(--accent); font-weight: 600; }
+input[type=range] { width: 100%; accent-color: var(--accent); margin: 6px 0 2px; }
+
+ol.timeline { list-style: none; margin: 0; padding: 0; position: relative; }
+ol.timeline::before { content: ''; position: absolute; left: 11px; top: 8px; bottom: 8px; border-left: 2px dotted var(--rule); }
+.seg { position: relative; padding: 6px 0 10px 34px; cursor: pointer; border-radius: 8px; animation: rise .4s both; }
+.seg:hover, .seg:focus-visible { background: color-mix(in srgb, var(--rule) 35%, transparent); }
+.seg::before { content: ''; position: absolute; left: 5px; top: 10px; width: 14px; height: 14px; border-radius: 50%; background: var(--panel); border: 3px solid var(--stop); }
+.seg.move::before { width: 8px; height: 8px; left: 8px; top: 13px; border: 0; background: var(--trail-early); }
+.seg .when { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.seg .what { font-family: var(--serif); font-size: 16px; line-height: 1.25; }
+.seg.move .what { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.seg .addr { font-size: 11px; color: var(--muted); margin-top: 2px; }
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+.note { border: 1px dashed var(--rule); border-radius: 12px; padding: 14px; color: var(--muted); line-height: 1.5; }
+.note strong { color: var(--ink); font-family: var(--serif); font-size: 16px; display: block; margin-bottom: 4px; }
+.btn { display: inline-flex; align-items: center; gap: 8px; margin-top: 10px; padding: 10px 14px; border-radius: 10px; border: 0; background: var(--ink); color: var(--panel); cursor: pointer; font-weight: 600; }
+.btn.ghost { background: transparent; color: var(--ink); border: 1px solid var(--rule); }
+.row-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+
+.pin-now { width: 18px; height: 18px; border-radius: 50%; background: var(--accent); border: 3px solid var(--panel); box-shadow: 0 0 0 0 var(--accent); animation: pulse 2.4s infinite; }
+@keyframes pulse { 70% { box-shadow: 0 0 0 14px transparent; } }
+.pin-stop { width: 14px; height: 14px; border-radius: 50%; background: var(--panel); border: 3px solid var(--stop); }
+.pin-label { font: 600 11px var(--mono); color: var(--ink); background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: 2px 6px; white-space: nowrap; }
+.leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--panel); color: var(--ink); }
+.leaflet-popup-content { font: 12px/1.45 var(--mono); }
+.leaflet-popup-content b { font: 600 14px var(--serif); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+</style>
+</head>
+<body>
+<div id="map" role="region" aria-label="Map of the selected item's trail"></div>
+<section id="panel" aria-label="Item history">
+  <button id="grab" aria-label="Expand or collapse the panel" aria-expanded="true"><span></span></button>
+  <header><h1>Item <em>Trails</em></h1><div id="status" role="status" aria-live="polite"></div></header>
+  <nav id="items" aria-label="Items"></nav>
+  <div class="scroll" id="body"></div>
+</section>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>
