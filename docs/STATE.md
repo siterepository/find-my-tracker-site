@@ -12,10 +12,10 @@ RECENT COMMITS:
 
 <!-- ship:agent:start — the agent writes this; preserved across checkpoints -->
 GOAL: Private Item Trails map (/map/) showing each Find My item's logged history from the tracker sheet.
-DONE: map page built; Web OAuth client "Item Trails map page" created (origin siterepository.github.io);
-  completion-judge cycle 1 REWORK, all 16 findings fixed and re-probed (race, 20k-row perf, pin under panel,
-  storage honesty, GIS error_callback, scrubber, stale day, status date, a11y, SRI, privacy copy).
-NEXT: merge feat/map to main, push, verify live URL; Steven signs in once on the phone to prove the live Google path.
+DONE: map page built; Web OAuth client "Item Trails map page" (origin siterepository.github.io);
+  completion gate: cycle 1 REWORK (16 fixed), cycle 2 REWORK (1 MAJOR + 3 MINOR fixed), cycle 3 PASS;
+  cycle-3 MINORs closed (stale tap overwrite, STATE refresh, probes committed to tests/browser/).
+NEXT: Steven signs in once on the live page from his phone to prove the real Google path.
 DECISIONS: browser-only, drive.file, token in tab memory, item choice in sessionStorage; see ~/Projects/Find/docs/DECISIONS.md.
 OPEN ERRORS: none
 <!-- ship:agent:end -->

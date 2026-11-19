@@ -169,10 +169,11 @@ async function selectItem(item) {
   renderChips();
   if (item === '__all') { state.points = []; render({ refit: true }); return; }
   $('#body').innerHTML = '<p class="note">Loading trail…</p>';
+  const asked = Date.now();
   try {
     const points = parseItemRows(await state.source.rows(item));
     if (seq !== state.seq) return;
-    state.points = points;
+    if (!(state.loadedAt > asked)) state.points = points; // a refresh that finished first has newer rows
     render({ refit: true });
   } catch (e) {
     if (seq !== state.seq) return;
